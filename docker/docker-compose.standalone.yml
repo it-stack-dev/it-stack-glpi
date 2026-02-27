@@ -1,0 +1,29 @@
+# Lab 01 — Standalone: Complete GLPI IT service management and CMDB in isolation
+# No external dependencies required.
+---
+services:
+  glpi:
+    image: diouxx/glpi:latest
+    container_name: it-stack-glpi
+    restart: unless-stopped
+    ports:
+      - "80:$firstPort"
+    environment:
+      - IT_STACK_ENV=lab-01-standalone
+    volumes:
+      - glpi_data:/var/lib/glpi
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - it-stack-net
+
+networks:
+  it-stack-net:
+    driver: bridge
+
+volumes:
+  glpi_data:

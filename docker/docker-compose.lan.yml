@@ -1,0 +1,36 @@
+# Lab 02 — External Dependencies: glpi with external PostgreSQL and Redis
+---
+services:
+  glpi:
+    image: diouxx/glpi:latest
+    container_name: it-stack-glpi
+    restart: unless-stopped
+    ports:
+      - "80:$firstPort"
+    environment:
+      - IT_STACK_ENV=lab-02-lan
+      - DB_HOST=
+      - DB_PORT=5432
+      - REDIS_HOST=
+    networks:
+      - it-stack-net
+
+  # Lightweight local DB for lab (replace with lab-db1 in real env)
+  postgres:
+    image: postgres:16
+    container_name: it-stack-glpi-db
+    environment:
+      POSTGRES_DB: glpi_db
+      POSTGRES_USER: glpi_user
+      POSTGRES_PASSWORD: glpi_pass
+    volumes:
+      - glpi_pg_data:/var/lib/postgresql/data
+    networks:
+      - it-stack-net
+
+networks:
+  it-stack-net:
+    driver: bridge
+
+volumes:
+  glpi_pg_data:
