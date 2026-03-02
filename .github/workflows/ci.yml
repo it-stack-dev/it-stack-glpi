@@ -184,3 +184,46 @@ run: bash tests/labs/test-lab-17-01.sh
       - name: Cleanup
         if: always()
         run: docker compose -f docker/docker-compose.advanced.yml down -v
+
+  lab-04-smoke:
+    name: Lab 04 -- GLPI SSO Integration (Keycloak SAML + OpenLDAP)
+    runs-on: ubuntu-latest
+    needs: validate
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get install -y curl default-mysql-client netcat-openbsd ldap-utils
+
+      - name: Validate SSO compose
+        run: docker compose -f docker/docker-compose.sso.yml config -q && echo "SSO compose valid"
+
+      - name: Start SSO stack
+        run: docker compose -f docker/docker-compose.sso.yml up -d
+
+      - name: Wait for MariaDB
+        run: timeout 120 bash -c 'until docker exec glpi-s04-db mysqladmin ping -uroot -pRootLab04! --silent; do sleep 5; done'
+
+      - name: Wait for OpenLDAP
+        run: timeout 120 bash -c 'until docker exec glpi-s04-ldap ldapsearch -x -H ldap://localhost -b dc=lab,dc=local -D cn=admin,dc=lab,dc=local -w LdapLab04! cn=admin >/dev/null 2>&1; do sleep 5; done'
+
+      - name: Wait for Keycloak
+        run: timeout 300 bash -c 'until curl -sf http://localhost:8532/realms/master; do sleep 10; done'
+
+      - name: Wait for Mailhog
+        run: timeout 60 bash -c 'until curl -sf http://localhost:8732/api/v2/messages; do sleep 5; done'
+
+      - name: Wait for GLPI app
+        run: timeout 360 bash -c 'until curl -o /dev/null -sw "%{http_code}" http://localhost:8432/ | grep -q "^[234]"; do sleep 15; done'
+
+      - name: Run Lab 17-04 test script
+        run: bash tests/labs/test-lab-17-04.sh --no-cleanup
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.sso.yml logs
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker/docker-compose.sso.yml down -v
