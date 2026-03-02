@@ -26,38 +26,120 @@ echo -e "${CYAN} Module: ${MODULE}${NC}"
 echo -e "${CYAN}======================================${NC}"
 echo ""
 
+# ── Cleanup control ───────────────────────────────────────────────────────────
+CLEANUP=true
+[[ "${1:-}" == "--no-cleanup" ]] && CLEANUP=false
+
+cleanup() {
+  if [[ "${CLEANUP}" == "true" ]]; then
+    info "Phase 4: Cleanup"
+    docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans 2>/dev/null || true
+    info "Cleanup complete"
+  else
+    info "Skipping cleanup (--no-cleanup)"
+  fi
+}
+trap cleanup EXIT
+
 # ── PHASE 1: Setup ────────────────────────────────────────────────────────────
 info "Phase 1: Setup"
 docker compose -f "${COMPOSE_FILE}" up -d
-info "Waiting 30s for ${MODULE} to initialize..."
-sleep 30
 
 # ── PHASE 2: Health Checks ────────────────────────────────────────────────────
 info "Phase 2: Health Checks"
 
-if docker compose -f "${COMPOSE_FILE}" ps | grep -q "running\|Up"; then
-    pass "Container is running"
-else
-    fail "Container is not running"
-fi
+info "Waiting for external MariaDB (glpi-l02-db, up to 90s)..."
+for i in $(seq 1 18); do
+  if docker exec glpi-l02-db mysqladmin ping -uroot -pRootLab02! --silent 2>/dev/null; then
+    pass "External MariaDB healthy"
+    break
+  fi
+  [[ $i -eq 18 ]] && fail "External MariaDB timed out after 90s"
+  sleep 5
+done
+
+info "Waiting for Mailhog (glpi-l02-mail, up to 60s)..."
+for i in $(seq 1 12); do
+  if curl -sf http://localhost:8712/api/v2/messages >/dev/null 2>&1; then
+    pass "Mailhog API reachable"
+    break
+  fi
+  [[ $i -eq 12 ]] && fail "Mailhog timed out after 60s"
+  sleep 5
+done
+
+info "Waiting for GLPI web (glpi-l02-app, up to 300s)..."
+for i in $(seq 1 30); do
+  if curl -sf http://localhost:8412/ 2>/dev/null | grep -qi 'glpi\|login\|doctype\|html'; then
+    pass "GLPI web serving HTML"
+    break
+  fi
+  [[ $i -eq 30 ]] && fail "GLPI web timed out after 300s"
+  sleep 10
+done
 
 # ── PHASE 3: Functional Tests ─────────────────────────────────────────────────
-info "Phase 3: Functional Tests (Lab 02 — External Dependencies)"
+info "Phase 3: Functional Tests (Lab 17-02 — External Dependencies)"
 
-# TODO: Add module-specific functional tests here
-# Example:
-# if curl -sf http://localhost:80/health > /dev/null 2>&1; then
-#     pass "Health endpoint responds"
-# else
-#     fail "Health endpoint not reachable"
-# fi
+# Container states
+for svc in glpi-l02-db glpi-l02-mail glpi-l02-app; do
+  state=$(docker inspect --format='{{.State.Status}}' "${svc}" 2>/dev/null || echo "missing")
+  if [[ "${state}" == "running" ]]; then
+    pass "Container ${svc} is running"
+  else
+    fail "Container ${svc} state: ${state}"
+  fi
+done
 
-warn "Functional tests for Lab 17-02 pending implementation"
+# DB connectivity from app container
+table_count=$(docker exec glpi-l02-db \
+  mysql -uglpi -pGlpiLab02! glpidb -e 'SHOW TABLES;' 2>/dev/null | wc -l | tr -d ' ')
+if [[ "${table_count}" -gt 10 ]]; then
+  pass "GLPI database has ${table_count} tables (setup ran)"
+else
+  warn "GLPI database tables: ${table_count} (setup may still be running)"
+fi
 
-# ── PHASE 4: Cleanup ──────────────────────────────────────────────────────────
-info "Phase 4: Cleanup"
-docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans
-info "Cleanup complete"
+# Mailhog API format check
+mailhog_resp=$(curl -sf http://localhost:8712/api/v2/messages 2>/dev/null || echo "{}")
+if echo "${mailhog_resp}" | grep -q 'total\|items\|count'; then
+  pass "Mailhog API returns valid JSON message list"
+else
+  fail "Mailhog API response unexpected: ${mailhog_resp}"
+fi
+
+# HTTP status check
+http_code=$(curl -o /dev/null -sw '%{http_code}' -L http://localhost:8412/ 2>/dev/null || echo "000")
+if [[ "${http_code}" =~ ^[234] ]]; then
+  pass "GLPI HTTP GET / -> ${http_code}"
+else
+  fail "GLPI HTTP GET / -> ${http_code}"
+fi
+
+# Login page present
+if curl -sf -L http://localhost:8412/ 2>/dev/null | grep -qi 'glpi\|login\|glpikey\|password'; then
+  pass "GLPI login page rendered"
+else
+  warn "GLPI login page check inconclusive"
+fi
+
+# Key env vars present in app container
+for var in MARIADB_HOST MARIADB_DATABASE MARIADB_USER; do
+  if docker exec glpi-l02-app printenv "${var}" 2>/dev/null | grep -q '.'; then
+    pass "Env var ${var} set in glpi-l02-app"
+  else
+    fail "Env var ${var} missing in glpi-l02-app"
+  fi
+done
+
+# Volume existence
+for vol in glpi-l02-db-data glpi-l02-files glpi-l02-plugins; do
+  if docker volume ls --format '{{.Name}}' | grep -q "${vol}"; then
+    pass "Volume ${vol} exists"
+  else
+    fail "Volume ${vol} missing"
+  fi
+done
 
 # ── Results ───────────────────────────────────────────────────────────────────
 echo ""

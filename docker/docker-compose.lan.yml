@@ -1,36 +1,85 @@
-# Lab 02 — External Dependencies: glpi with external PostgreSQL and Redis
+# Lab 02 — External Dependencies: GLPI with external MariaDB and Mailhog
+# Models the LAN tier: MariaDB on data-net (simulates lab-db1), app on app-net.
+# GLPI:    http://localhost:8412
+# Mailhog: http://localhost:8712
 ---
+name: it-stack-glpi-lab02
+
 services:
-  glpi:
-    image: diouxx/glpi:latest
-    container_name: it-stack-glpi
+
+  # ── External Database (simulates lab-db1) ─────────────────────────────────
+  glpi-l02-db:
+    image: mariadb:10.11
+    container_name: glpi-l02-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: RootLab02!
+      MARIADB_DATABASE: glpidb
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiLab02!
+    volumes:
+      - glpi-l02-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - glpi-l02-data-net
+
+  # ── External SMTP relay (Mailhog) ─────────────────────────────────────────
+  glpi-l02-mail:
+    image: mailhog/mailhog:latest
+    container_name: glpi-l02-mail
     restart: unless-stopped
     ports:
-      - "80:$firstPort"
-    environment:
-      - IT_STACK_ENV=lab-02-lan
-      - DB_HOST=
-      - DB_PORT=5432
-      - REDIS_HOST=
+      - "8712:8025"
     networks:
-      - it-stack-net
+      - glpi-l02-app-net
 
-  # Lightweight local DB for lab (replace with lab-db1 in real env)
-  postgres:
-    image: postgres:16
-    container_name: it-stack-glpi-db
+  # ── GLPI application ──────────────────────────────────────────────────────
+  glpi-l02-app:
+    image: diouxx/glpi:latest
+    container_name: glpi-l02-app
+    restart: unless-stopped
+    depends_on:
+      glpi-l02-db:
+        condition: service_healthy
+      glpi-l02-mail:
+        condition: service_started
     environment:
-      POSTGRES_DB: glpi_db
-      POSTGRES_USER: glpi_user
-      POSTGRES_PASSWORD: glpi_pass
+      MARIADB_HOST: glpi-l02-db
+      MARIADB_PORT: "3306"
+      MARIADB_DATABASE: glpidb
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiLab02!
+      MARIADB_ROOT_PASSWORD: RootLab02!
+      GLPI_LANG: en_GB
+      TIMEZONE: UTC
+      VERSION: "10.0.14"
+    ports:
+      - "8412:80"
     volumes:
-      - glpi_pg_data:/var/lib/postgresql/data
+      - glpi-l02-files:/var/www/html/files
+      - glpi-l02-plugins:/var/www/html/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi\\|login\\|doctype' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 120s
     networks:
-      - it-stack-net
+      - glpi-l02-data-net
+      - glpi-l02-app-net
 
 networks:
-  it-stack-net:
+  glpi-l02-data-net:
+    driver: bridge
+  glpi-l02-app-net:
     driver: bridge
 
 volumes:
-  glpi_pg_data:
+  glpi-l02-db-data:
+  glpi-l02-files:
+  glpi-l02-plugins:
