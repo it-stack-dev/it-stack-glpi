@@ -1,26 +1,200 @@
-# Lab 05 — Advanced Integration: glpi with full IT-Stack ecosystem
----
+# =============================================================================
+# IT-Stack: GLPI — Lab 05: Advanced Integration
+# Module 17 · Phase 4 · Lab 05
+# =============================================================================
+# Services: MariaDB · OpenLDAP · Keycloak · WireMock (Zammad-mock) · Mailhog · GLPI
+# Ports:    App:8442  WireMock:8763  KC:8542  LDAP:3887  MH:8742
+# Credentials:
+#   DB root:  RootLab05!  app: glpi / GlpiLab05!
+#   Keycloak: admin / Admin05!
+#   LDAP:     cn=admin,dc=lab,dc=local / LdapLab05!
+# What's new vs Lab 04:
+#   + WireMock 3.x simulates Zammad REST API (ticket escalation)
+#   + GLPI configured with ZAMMAD_URL for ticket escalation flow
+#   + Integration tested: GLPI → Zammad REST API (ticket create/list)
+# =============================================================================
+
+name: it-stack-glpi-lab05
+
 services:
-  glpi:
-    image: diouxx/glpi:latest
-    container_name: it-stack-glpi
+
+  # ── MariaDB ────────────────────────────────────────────────────────────────
+  glpi-i05-db:
+    image: mariadb:10.11
+    container_name: glpi-i05-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: RootLab05!
+      MYSQL_DATABASE: glpi
+      MYSQL_USER: glpi
+      MYSQL_PASSWORD: GlpiLab05!
+    volumes:
+      - glpi-i05-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-pRootLab05!", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      - glpi-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ── OpenLDAP ───────────────────────────────────────────────────────────────
+  glpi-i05-ldap:
+    image: osixia/openldap:1.5.0
+    container_name: glpi-i05-ldap
+    restart: unless-stopped
+    environment:
+      LDAP_ORGANISATION: "IT-Stack Lab"
+      LDAP_DOMAIN: lab.local
+      LDAP_ADMIN_PASSWORD: LdapLab05!
+      LDAP_CONFIG_PASSWORD: ConfigLab05!
+      LDAP_BASE_DN: dc=lab,dc=local
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: readonly
+      LDAP_READONLY_USER_PASSWORD: ReadOnly05!
+    ports:
+      - "3887:389"
+    volumes:
+      - glpi-i05-ldap-data:/var/lib/ldap
+      - glpi-i05-ldap-config:/etc/ldap/slapd.d
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost -b dc=lab,dc=local -D cn=admin,dc=lab,dc=local -w LdapLab05! cn=admin > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      - glpi-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  # ── Keycloak ───────────────────────────────────────────────────────────────
+  glpi-i05-kc:
+    image: quay.io/keycloak/keycloak:24.0.3
+    container_name: glpi-i05-kc
+    restart: unless-stopped
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Admin05!
+      KC_HEALTH_ENABLED: "true"
+      KC_DB: dev-file
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "8542:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/realms/master || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks:
+      - glpi-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  # ── WireMock — Zammad REST API mock ─────────────────────────────────────────
+  glpi-i05-mock:
+    image: wiremock/wiremock:3.3.1
+    container_name: glpi-i05-mock
+    restart: unless-stopped
+    command: >
+      --port=8080
+      --verbose
+      --global-response-templating
+    ports:
+      - "8763:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/__admin/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - glpi-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  # ── Mailhog ────────────────────────────────────────────────────────────────
+  glpi-i05-mail:
+    image: mailhog/mailhog:latest
+    container_name: glpi-i05-mail
     restart: unless-stopped
     ports:
-      - "80:$firstPort"
-    environment:
-      - IT_STACK_ENV=lab-05-integration
-      - KEYCLOAK_URL=
-      - DB_HOST=
-      - REDIS_HOST=
-      - SMTP_HOST=
-      - GRAYLOG_HOST=
-    extra_hosts:
-      - "lab-id1:10.0.50.11"
-      - "lab-db1:10.0.50.12"
-      - "lab-proxy1:10.0.50.15"
+      - "8742:8025"
     networks:
-      - it-stack-net
+      - glpi-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.1"
 
+  # ── GLPI ──────────────────────────────────────────────────────────────────
+  glpi-i05-app:
+    image: diouxx/glpi:latest
+    container_name: glpi-i05-app
+    restart: unless-stopped
+    depends_on:
+      glpi-i05-db:
+        condition: service_healthy
+      glpi-i05-ldap:
+        condition: service_healthy
+      glpi-i05-mock:
+        condition: service_healthy
+    ports:
+      - "8442:80"
+    environment:
+      MARIADB_HOST: glpi-i05-db
+      MARIADB_PORT: "3306"
+      MARIADB_DATABASE: glpi
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiLab05!
+      GLPI_LDAP_HOST: glpi-i05-ldap
+      GLPI_LDAP_PORT: "389"
+      GLPI_LDAP_BASE_DN: dc=lab,dc=local
+      GLPI_LDAP_BIND_DN: cn=admin,dc=lab,dc=local
+      GLPI_LDAP_BIND_PASSWORD: LdapLab05!
+      KEYCLOAK_URL: http://glpi-i05-kc:8080
+      KEYCLOAK_REALM: it-stack
+      KEYCLOAK_CLIENT_ID: glpi
+      # Zammad integration (via WireMock)
+      ZAMMAD_URL: http://glpi-i05-mock:8080
+      ZAMMAD_TOKEN: lab-zammad-token-05
+      ZAMMAD_USER: admin@lab.local
+    volumes:
+      - glpi-i05-app-data:/var/www/html/files
+    networks:
+      - glpi-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+# ── Networks ───────────────────────────────────────────────────────────────────
 networks:
-  it-stack-net:
+  glpi-i05-net:
+    name: glpi-i05-net
     driver: bridge
+
+# ── Volumes ────────────────────────────────────────────────────────────────────
+volumes:
+  glpi-i05-db-data:
+  glpi-i05-ldap-data:
+  glpi-i05-ldap-config:
+  glpi-i05-app-data:
