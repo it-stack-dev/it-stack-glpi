@@ -1,12 +1,245 @@
-# Lab 06 — Production: glpi HA-ready with monitoring and external volumes
----
+# =============================================================================
+# IT-Stack: GLPI — Lab 06: Production Deployment
+# Module 17 · Phase 4 · Lab 06
+# =============================================================================
+# Services: MariaDB · OpenLDAP · Keycloak · Mailhog · GLPI App · GLPI Cron
+# Ports:    App:8462  KC:8562  LDAP:3873  MH:8752
+# Credentials:
+#   DB root: RootProd06!  app: glpi / GlpiProd06!
+#   Keycloak: admin / Admin06!
+#   LDAP:     cn=admin,dc=lab,dc=local / LdapProd06!
+# Production features vs Lab 05:
+#   + restart: unless-stopped on ALL services
+#   + Resource limits AND reservations on every service
+#   + Dedicated cron container (GLPI automatic actions + notifications)
+#   + IT_STACK_ENV: production  IT_STACK_LAB: "06" labels
+#   + Healthcheck start_period on all services
+# =============================================================================
+
+name: it-stack-glpi-lab06
+
 services:
-  glpi:
-    image: diouxx/glpi:latest
-    container_name: it-stack-glpi
-    restart: always
+
+  # ── MariaDB ────────────────────────────────────────────────────────────────
+  glpi-p06-db:
+    image: mariadb:10.11
+    container_name: glpi-p06-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: RootProd06!
+      MYSQL_DATABASE: glpi
+      MYSQL_USER: glpi
+      MYSQL_PASSWORD: GlpiProd06!
+    volumes:
+      - glpi-p06-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-pRootProd06!", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - glpi-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  # ── OpenLDAP ───────────────────────────────────────────────────────────────
+  glpi-p06-ldap:
+    image: osixia/openldap:1.5.0
+    container_name: glpi-p06-ldap
+    restart: unless-stopped
+    environment:
+      LDAP_ORGANISATION: "IT-Stack Production"
+      LDAP_DOMAIN: lab.local
+      LDAP_ADMIN_PASSWORD: LdapProd06!
+      LDAP_CONFIG_PASSWORD: ConfigProd06!
+      LDAP_BASE_DN: dc=lab,dc=local
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: readonly
+      LDAP_READONLY_USER_PASSWORD: ReadOnlyProd06!
     ports:
-      - "80:$firstPort"
+      - "3873:389"
+    volumes:
+      - glpi-p06-ldap-data:/var/lib/ldap
+      - glpi-p06-ldap-config:/etc/ldap/slapd.d
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost -b dc=lab,dc=local -D cn=admin,dc=lab,dc=local -w LdapProd06! cn=admin > /dev/null 2>&1 && echo ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - glpi-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+  # ── Keycloak ───────────────────────────────────────────────────────────────
+  glpi-p06-kc:
+    image: quay.io/keycloak/keycloak:24.0.3
+    container_name: glpi-p06-kc
+    restart: unless-stopped
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Admin06!
+      KC_HEALTH_ENABLED: "true"
+      KC_DB: dev-file
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "8562:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/realms/master || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - glpi-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  # ── Mailhog ────────────────────────────────────────────────────────────────
+  glpi-p06-mail:
+    image: mailhog/mailhog:latest
+    container_name: glpi-p06-mail
+    restart: unless-stopped
+    ports:
+      - "8752:8025"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8025/api/v2/messages || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - glpi-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+
+  # ── GLPI App ─────────────────────────────────────────────────────────────────
+  glpi-p06-app:
+    image: diouxx/glpi:latest
+    container_name: glpi-p06-app
+    restart: unless-stopped
+    depends_on:
+      glpi-p06-db:
+        condition: service_healthy
+      glpi-p06-ldap:
+        condition: service_healthy
+      glpi-p06-kc:
+        condition: service_healthy
+    ports:
+      - "8462:80"
+    environment:
+      IT_STACK_ENV: production
+      IT_STACK_MODULE: glpi
+      IT_STACK_LAB: "06"
+      MARIADB_HOST: glpi-p06-db
+      MARIADB_PORT: "3306"
+      MARIADB_DATABASE: glpi
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiProd06!
+      GLPI_LDAP_HOST: glpi-p06-ldap
+      GLPI_LDAP_PORT: "389"
+      GLPI_LDAP_BASE_DN: dc=lab,dc=local
+      GLPI_LDAP_BIND_DN: cn=admin,dc=lab,dc=local
+      GLPI_LDAP_BIND_PASSWORD: LdapProd06!
+      KEYCLOAK_URL: http://glpi-p06-kc:8080
+      KEYCLOAK_REALM: it-stack
+      KEYCLOAK_CLIENT_ID: glpi
+      KEYCLOAK_CLIENT_SECRET: glpi-prod-secret-06
+      GLPI_SMTP_HOST: glpi-p06-mail
+      GLPI_SMTP_PORT: "1025"
+      GLPI_SMTP_FROM: glpi@lab.local
+      ZAMMAD_URL: http://zammad.lab.local:3000
+      ZAMMAD_TOKEN: prod-zammad-token-06
+    volumes:
+      - glpi-p06-app-data:/var/www/html/files
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - glpi-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  # ── GLPI Cron (automatic actions + notifications) ─────────────────────────
+  glpi-p06-cron:
+    image: diouxx/glpi:latest
+    container_name: glpi-p06-cron
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "-c", "while true; do php /var/www/html/front/cron.php > /dev/null 2>&1; sleep 60; done"]
+    depends_on:
+      glpi-p06-app:
+        condition: service_healthy
+    environment:
+      IT_STACK_ENV: production
+      IT_STACK_MODULE: glpi
+      IT_STACK_LAB: "06"
+      MARIADB_HOST: glpi-p06-db
+      MARIADB_PORT: "3306"
+      MARIADB_DATABASE: glpi
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiProd06!
+    volumes:
+      - glpi-p06-app-data:/var/www/html/files
+    networks:
+      - glpi-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+
+# ── Networks ───────────────────────────────────────────────────────────────────
+networks:
+  glpi-p06-net:
+    name: glpi-p06-net
+    driver: bridge
+
+# ── Volumes ────────────────────────────────────────────────────────────────────
+volumes:
+  glpi-p06-db-data:
+  glpi-p06-ldap-data:
+  glpi-p06-ldap-config:
+  glpi-p06-app-data:
     environment:
       - IT_STACK_ENV=production
       - KEYCLOAK_URL=
