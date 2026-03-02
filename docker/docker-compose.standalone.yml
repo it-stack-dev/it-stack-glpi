@@ -1,29 +1,66 @@
-# Lab 01 — Standalone: Complete GLPI IT service management and CMDB in isolation
-# No external dependencies required.
+# Lab 01 — Standalone: GLPI IT service management and CMDB in isolation
+# Uses MariaDB as local database — no external dependencies required.
 ---
+name: it-stack-glpi-lab01
+
 services:
-  glpi:
-    image: diouxx/glpi:latest
-    container_name: it-stack-glpi
+
+  glpi-s01-db:
+    image: mariadb:10.11
+    container_name: glpi-s01-db
     restart: unless-stopped
-    ports:
-      - "80:$firstPort"
     environment:
-      - IT_STACK_ENV=lab-01-standalone
+      MARIADB_ROOT_PASSWORD: root_lab_password
+      MARIADB_DATABASE: glpidb
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: glpi_lab_password
     volumes:
-      - glpi_data:/var/lib/glpi
+      - glpi-s01-db-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
-      interval: 30s
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 6
       start_period: 60s
     networks:
-      - it-stack-net
+      - glpi-s01-net
+
+  glpi-s01-app:
+    image: diouxx/glpi:latest
+    container_name: glpi-s01-app
+    restart: unless-stopped
+    depends_on:
+      glpi-s01-db:
+        condition: service_healthy
+    environment:
+      MARIADB_HOST: glpi-s01-db
+      MARIADB_PORT: "3306"
+      MARIADB_DATABASE: glpidb
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: glpi_lab_password
+      MARIADB_ROOT_PASSWORD: root_lab_password
+      GLPI_LANG: en_GB
+      TIMEZONE: UTC
+      VERSION: "10.0.14"
+    ports:
+      - "8402:80"
+    volumes:
+      - glpi-s01-app-files:/var/www/html/files
+      - glpi-s01-app-plugins:/var/www/html/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi\|login' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 120s
+    networks:
+      - glpi-s01-net
 
 networks:
-  it-stack-net:
+  glpi-s01-net:
     driver: bridge
 
 volumes:
-  glpi_data:
+  glpi-s01-db-data:
+  glpi-s01-app-files:
+  glpi-s01-app-plugins:
