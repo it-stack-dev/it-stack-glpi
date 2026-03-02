@@ -1,4 +1,129 @@
-# Lab 03 — Advanced Features: glpi with TLS, resource limits, logging
+# Lab 03 — Advanced Features: GLPI with dedicated cron container + resource limits
+# Cron container runs GLPI scheduler · resource limits on all containers
+# GLPI:    http://localhost:8422
+# Mailhog: http://localhost:8722
+---
+name: it-stack-glpi-lab03
+
+services:
+
+  # ── External Database ───────────────────────────────────────────────────
+  glpi-a03-db:
+    image: mariadb:10.11
+    container_name: glpi-a03-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: RootLab03!
+      MARIADB_DATABASE: glpidb
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiLab03!
+    volumes:
+      - glpi-a03-db-data:/var/lib/mysql
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "3"}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - glpi-a03-net
+
+  # ── SMTP relay (Mailhog) ─────────────────────────────────────────────
+  glpi-a03-mail:
+    image: mailhog/mailhog:latest
+    container_name: glpi-a03-mail
+    restart: unless-stopped
+    ports:
+      - "8722:8025"
+    networks:
+      - glpi-a03-net
+
+  # ── GLPI Application ──────────────────────────────────────────────────
+  glpi-a03-app:
+    image: diouxx/glpi:latest
+    container_name: glpi-a03-app
+    restart: unless-stopped
+    depends_on:
+      glpi-a03-db: {condition: service_healthy}
+      glpi-a03-mail: {condition: service_started}
+    environment:
+      MARIADB_HOST: glpi-a03-db
+      MARIADB_PORT: "3306"
+      MARIADB_DATABASE: glpidb
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiLab03!
+      MARIADB_ROOT_PASSWORD: RootLab03!
+      GLPI_LANG: en_GB
+      TIMEZONE: UTC
+      VERSION: "10.0.14"
+    ports:
+      - "8422:80"
+    volumes:
+      - glpi-a03-files:/var/www/html/files
+      - glpi-a03-plugins:/var/www/html/plugins
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options: {max-size: "100m", max-file: "5"}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi\\|login\\|doctype' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 8
+      start_period: 120s
+    networks:
+      - glpi-a03-net
+
+  # ── GLPI Cron Container (new in Lab 03) ────────────────────────────
+  glpi-a03-cron:
+    image: diouxx/glpi:latest
+    container_name: glpi-a03-cron
+    restart: unless-stopped
+    depends_on:
+      glpi-a03-app: {condition: service_healthy}
+    entrypoint: ["/bin/bash", "-c", "while true; do php /var/www/html/front/cron.php > /dev/null 2>&1; sleep 60; done"]
+    environment:
+      MARIADB_HOST: glpi-a03-db
+      MARIADB_DATABASE: glpidb
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: GlpiLab03!
+      MARIADB_ROOT_PASSWORD: RootLab03!
+      GLPI_LANG: en_GB
+      TIMEZONE: UTC
+    volumes:
+      - glpi-a03-files:/var/www/html/files
+      - glpi-a03-plugins:/var/www/html/plugins
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "3"}
+    networks:
+      - glpi-a03-net
+
+networks:
+  glpi-a03-net:
+    driver: bridge
+
+volumes:
+  glpi-a03-db-data:
+  glpi-a03-files:
+  glpi-a03-plugins:
 ---
 services:
   glpi:
