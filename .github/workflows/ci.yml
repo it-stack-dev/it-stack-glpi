@@ -229,7 +229,7 @@ run: bash tests/labs/test-lab-17-01.sh
         run: docker compose -f docker/docker-compose.sso.yml down -v
 
   lab-05-smoke:
-    name: Lab 17-05 -- GLPI Advanced Integration (Zammad REST API)
+    name: Lab 17-05 -- GLPI Advanced Integration (INT-07 GLPI<->Keycloak SAML 2.0 + LDAP)
     runs-on: ubuntu-latest
     needs: validate
     continue-on-error: true
@@ -237,7 +237,7 @@ run: bash tests/labs/test-lab-17-01.sh
       - uses: actions/checkout@v4
 
       - name: Install tools
-        run: sudo apt-get install -y curl default-mysql-client netcat-openbsd ldap-utils
+        run: sudo apt-get install -y curl default-mysql-client netcat-openbsd ldap-utils python3
 
       - name: Validate integration compose
         run: docker compose -f docker/docker-compose.integration.yml config -q && echo "Integration compose valid"
@@ -245,17 +245,23 @@ run: bash tests/labs/test-lab-17-01.sh
       - name: Start integration stack
         run: docker compose -f docker/docker-compose.integration.yml up -d
 
-      - name: Wait for WireMock
-        run: timeout 90 bash -c 'until curl -sf http://localhost:8763/__admin/health; do sleep 5; done'
-
       - name: Wait for MariaDB
         run: timeout 120 bash -c 'until docker exec glpi-i05-db mysqladmin ping -uroot -pRootLab05! --silent 2>/dev/null; do sleep 5; done'
 
+      - name: Wait for OpenLDAP
+        run: timeout 120 bash -c 'until docker exec glpi-i05-ldap ldapsearch -x -H ldap://localhost -b dc=lab,dc=local -D cn=admin,dc=lab,dc=local -w LdapLab05! > /dev/null 2>&1; do sleep 5; done'
+
+      - name: Wait for LDAP seed to complete
+        run: timeout 120 bash -c 'until docker inspect glpi-i05-ldap-seed --format "{{.State.Status}}" 2>/dev/null | grep -q exited; do sleep 5; done'
+
       - name: Wait for Keycloak
-        run: timeout 300 bash -c 'until curl -sf http://localhost:8542/realms/master; do sleep 10; done'
+        run: timeout 300 bash -c 'until curl -sf http://localhost:8542/health/ready | grep -q UP; do sleep 10; done'
+
+      - name: Wait for WireMock
+        run: timeout 90 bash -c 'until curl -sf http://localhost:8763/__admin/health; do sleep 5; done'
 
       - name: Wait for GLPI
-        run: timeout 300 bash -c 'until curl -sf http://localhost:8442/ | grep -qi glpi; do sleep 15; done'
+        run: timeout 300 bash -c 'until curl -sf http://localhost:8442/ > /dev/null 2>&1; do sleep 15; done'
 
       - name: Run Lab 17-05 test script
         run: bash tests/labs/test-lab-17-05.sh --no-cleanup

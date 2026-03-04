@@ -2,16 +2,18 @@
 # IT-Stack: GLPI — Lab 05: Advanced Integration
 # Module 17 · Phase 4 · Lab 05
 # =============================================================================
-# Services: MariaDB · OpenLDAP · Keycloak · WireMock (Zammad-mock) · Mailhog · GLPI
+# Services: MariaDB · OpenLDAP · LDAP-Seed · Keycloak · WireMock (Zammad-mock) · Mailhog · GLPI
 # Ports:    App:8442  WireMock:8763  KC:8542  LDAP:3887  MH:8742
 # Credentials:
 #   DB root:  RootLab05!  app: glpi / GlpiLab05!
 #   Keycloak: admin / Admin05!
-#   LDAP:     cn=admin,dc=lab,dc=local / LdapLab05!
+#   LDAP:     cn=admin,dc=lab,dc=local / LdapLab05!    readonly: ReadOnly05!
+#   LDAP users: glpiadmin/glpiuser1/glpiuser2  pw: Lab05Password!
 # What's new vs Lab 04:
-#   + WireMock 3.x simulates Zammad REST API (ticket escalation)
-#   + GLPI configured with ZAMMAD_URL for ticket escalation flow
-#   + Integration tested: GLPI → Zammad REST API (ticket create/list)
+#   + INT-07 Keycloak SAML 2.0 SSO for GLPI (SP-initiated SAML flow)
+#   + LDAP seed init container (glpi-i05-ldap-seed) — FreeIPA-style tree
+#   + KC depends on seed exit; SAML client "glpi" registered in realm
+#   + GLPI container carries KC_SAML_* env vars for Ansible provisioner
 # =============================================================================
 
 name: it-stack-glpi-lab05
@@ -75,6 +77,26 @@ services:
           memory: 256M
           cpus: "0.25"
 
+  # ── LDAP Seed (init container) ────────────────────────────────────────────
+  glpi-i05-ldap-seed:
+    image: osixia/openldap:1.5.0
+    container_name: glpi-i05-ldap-seed
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sleep 5
+        ldapadd -x -H ldap://glpi-i05-ldap:389 \
+          -D cn=admin,dc=lab,dc=local -w LdapLab05! \
+          -f /seed/glpi-ldap-seed.ldif && echo "LDAP seed complete" || echo "LDAP seed already exists (idempotent)"
+    volumes:
+      - ./glpi-ldap-seed.ldif:/seed/glpi-ldap-seed.ldif:ro
+    depends_on:
+      glpi-i05-ldap:
+        condition: service_healthy
+    networks:
+      - glpi-i05-net
+    restart: "no"
+
   # ── Keycloak ───────────────────────────────────────────────────────────────
   glpi-i05-kc:
     image: quay.io/keycloak/keycloak:24.0.3
@@ -97,6 +119,9 @@ services:
       timeout: 10s
       retries: 20
       start_period: 30s
+    depends_on:
+      glpi-i05-ldap-seed:
+        condition: service_completed_successfully
     networks:
       - glpi-i05-net
     deploy:
@@ -172,6 +197,9 @@ services:
       KEYCLOAK_URL: http://glpi-i05-kc:8080
       KEYCLOAK_REALM: it-stack
       KEYCLOAK_CLIENT_ID: glpi
+      KC_SAML_IDP_METADATA_URL: http://glpi-i05-kc:8080/realms/it-stack/protocol/saml/descriptor
+      KC_SAML_SP_ENTITY_ID: http://localhost:8442/glpi
+      KC_SAML_ACS_URL: http://localhost:8442/glpi/index.php
       # Zammad integration (via WireMock)
       ZAMMAD_URL: http://glpi-i05-mock:8080
       ZAMMAD_TOKEN: lab-zammad-token-05

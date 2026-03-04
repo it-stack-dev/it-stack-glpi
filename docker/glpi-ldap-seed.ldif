@@ -1,0 +1,80 @@
+# glpi-ldap-seed.ldif — INT-07 GLPI LDAP seed data
+# FreeIPA-style tree: cn=accounts, cn=users/groups inside it
+# Users: glpiadmin, glpiuser1, glpiuser2 (pw: Lab05Password!)
+# Groups: cn=admins (glpiadmin), cn=glpi-users (glpiuser1, glpiuser2)
+# Password hash: {SHA}qXfpnPbMmQGBSoY24+XFwHVzBpk= = "Lab05Password!"
+
+dn: dc=lab,dc=local
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: IT-Stack Lab
+dc: lab
+
+dn: cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: organizationalUnit
+ou: accounts
+
+dn: cn=users,cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: organizationalUnit
+ou: users
+
+dn: cn=groups,cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: organizationalUnit
+ou: groups
+
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+dn: uid=glpiadmin,cn=users,cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+uid: glpiadmin
+cn: GLPI Admin
+sn: Admin
+givenName: GLPI
+mail: glpiadmin@lab.local
+userPassword: Lab05Password!
+
+dn: uid=glpiuser1,cn=users,cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+uid: glpiuser1
+cn: GLPI User1
+sn: User1
+givenName: GLPI
+mail: glpiuser1@lab.local
+userPassword: Lab05Password!
+
+dn: uid=glpiuser2,cn=users,cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: organizationalPerson
+objectClass: person
+uid: glpiuser2
+cn: GLPI User2
+sn: User2
+givenName: GLPI
+mail: glpiuser2@lab.local
+userPassword: Lab05Password!
+
+# ── Groups ────────────────────────────────────────────────────────────────────
+
+dn: cn=admins,cn=groups,cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: groupOfNames
+cn: admins
+member: uid=glpiadmin,cn=users,cn=accounts,dc=lab,dc=local
+
+dn: cn=glpi-users,cn=groups,cn=accounts,dc=lab,dc=local
+objectClass: top
+objectClass: groupOfNames
+cn: glpi-users
+member: uid=glpiuser1,cn=users,cn=accounts,dc=lab,dc=local
+member: uid=glpiuser2,cn=users,cn=accounts,dc=lab,dc=local
