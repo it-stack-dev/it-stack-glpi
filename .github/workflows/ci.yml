@@ -102,7 +102,7 @@ jobs:
           docker compose -f docker/docker-compose.standalone.yml ps
 
       - name: Run Lab 01 test script
-run: bash tests/labs/test-lab-17-01.sh
+        run: bash tests/labs/test-lab-17-01.sh
 
       - name: Collect logs on failure
         if: failure()
