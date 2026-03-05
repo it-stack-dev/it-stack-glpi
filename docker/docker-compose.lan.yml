@@ -64,7 +64,7 @@ services:
       - glpi-l02-files:/var/www/html/files
       - glpi-l02-plugins:/var/www/html/plugins
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi\|login\|doctype' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi|login|doctype' || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 8
