@@ -48,7 +48,7 @@ services:
       - glpi-s01-app-files:/var/www/html/files
       - glpi-s01-app-plugins:/var/www/html/plugins
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi\|login' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi|login' || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 8

@@ -274,13 +274,3 @@ volumes:
       start_period: 120s
     networks:
       - it-stack-net
-
-networks:
-  it-stack-net:
-    external: true
-    name: it-stack-production
-
-volumes:
-  glpi_data:
-    external: true
-    name: it-stack-glpi-data

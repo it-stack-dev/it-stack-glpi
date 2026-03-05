@@ -78,7 +78,7 @@ services:
       driver: json-file
       options: {max-size: "100m", max-file: "5"}
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi\\|login\\|doctype' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost/ | grep -qi 'glpi\|login\|doctype' || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 8
@@ -150,10 +150,3 @@ services:
         max-file: "5"
     networks:
       - it-stack-net
-
-networks:
-  it-stack-net:
-    driver: bridge
-
-volumes:
-  glpi_data:
