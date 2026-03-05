@@ -240,37 +240,3 @@ volumes:
   glpi-p06-ldap-data:
   glpi-p06-ldap-config:
   glpi-p06-app-data:
-    environment:
-      - IT_STACK_ENV=production
-      - KEYCLOAK_URL=
-      - DB_HOST=
-      - REDIS_HOST=
-      - GRAYLOG_HOST=
-    volumes:
-      - glpi_data:/var/lib/glpi
-      - /etc/ssl/certs:/etc/ssl/certs:ro
-    deploy:
-      replicas: 1
-      resources:
-        limits:
-          cpus: "4.0"
-          memory: G
-        reservations:
-          cpus: "1.0"
-          memory: 1G
-      restart_policy:
-        condition: any
-        delay: 5s
-    logging:
-      driver: gelf
-      options:
-        gelf-address: "udp://${GRAYLOG_HOST}:12201"
-        tag: "it-stack-glpi"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-    networks:
-      - it-stack-net
